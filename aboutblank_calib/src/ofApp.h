@@ -6,6 +6,7 @@
 #include "ofxOpenCv.h"
 #include "ofxXmlSettings.h"
 #include "ofxUtils.h"
+#include "ofxCv.h"
 
 #include "GLFW/glfw3.h"
 
@@ -51,6 +52,9 @@ public:
 	// calibrations
 	// general
 	ofxCvContourFinder	contourFinder;
+	ofVec3f				patternLeft_k, patternRight_k, patternLeft_k_prev, patternRight_k_prev;
+	float				bookAngle;
+	bool				bookIsMoving, bookIsMoving_prev;
 	// gray detection shader
 	ofShader			gd_shader;
 	ofFbo				gd_fboRes;
@@ -76,6 +80,13 @@ public:
 	ofVec3f				t2k_testPoint_k;
 	// calib 2 : pattern detection
 	ofColor				pd_colorToDetect;
+	// calib 3 : page flipping detection
+	vector<ofVec3f>			pf_detectionQuad_k;
+	ofFbo					pf_fboMask;
+	ofxCvGrayscaleImage		pf_bg, pf_diff;
+	ofxCv::ContourFinder	pf_pageContourFinder;
+	float					pf_contourStartX;
+	bool					pf_pageForward, pf_pageBackward;
 
 	// gui
 	ofxPanel			gui;
@@ -84,6 +95,9 @@ public:
 	ofxIntSlider		grayThresholdDetect, minDet, maxDet;
 	// calib 2 : pattern detection
 	ofxFloatSlider		pd_colorThresh;
+	// calib 3 : page flipping
+	ofxFloatSlider		speedThreshold;
+	ofxIntSlider		pageMinDet, pageMaxDet;
 
 	//
 	int					calibStateInd = 0;

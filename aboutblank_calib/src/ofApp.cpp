@@ -2,6 +2,9 @@
 
 //--------------------------------------------------------------
 void ofApp::setup() {
+	// general
+	ofSetFrameRate(30);
+
 	// gui
 	gui.setup();
 	gui.setPosition(2 * kinect.width + 10, 500);
@@ -13,14 +16,17 @@ void ofApp::setup() {
 	gui.add(tableMaxW.setup("TABLEMAX_W", 1.0, 0.0, 1.0));
 	// gray threshold detect
 	gui.add(grayThresholdDetect.setup("GRAYTHRESHOLDDETECT", 11, 0, 255));
-	gui.add(minDet.setup("MINDET", 5, 1, 5000));
-	gui.add(maxDet.setup("MAXDET", 400, 1, 5000));
+	gui.add(minDet.setup("MINDET", 5, 1, 500));
+	gui.add(maxDet.setup("MAXDET", 400, 1, 500));
 	// calib state 2
 	gui.add(pd_colorThresh.setup("PD_COLORTHRESH", 0.1, 0.0, 1.0));
+	// calib state 3
+	gui.add(speedThreshold.setup("SPEEDTHRESHOLD", 0.0, 0.0, 5.0));
+	gui.add(pageMinDet.setup("PAGEMINDET", 5, 1, 500));
+	gui.add(pageMaxDet.setup("PAGEMAXDET", 250, 1, 1000));
 
 	// functions
 	saveCalib.addListener(this, &ofApp::saveCalibFunc);
-
 
 	// init stuff for k2p calibration
 	k2p_draggablePoint.setup(kinect.width * 0.5, kinect.height * 1.5, 8);
@@ -44,6 +50,11 @@ void ofApp::setup() {
 	p.x = 25;
 	p.y = 25;
 	t2k_storePoints.push_back(p);
+
+	// init stuff for page flipping detection
+	pf_pageContourFinder.setThreshold(15);
+	pf_pageContourFinder.getTracker().setMaximumDistance(50);
+	pf_pageContourFinder.getTracker().setPersistence(30);
 
 	// load data
 	gui.loadFromFile("aboutblank_calib.json");
@@ -106,6 +117,10 @@ void ofApp::setup() {
 	cd_fboRes.allocate(kinect.width, kinect.height, GL_RGB);
 	cd_resImColor.allocate(kinect.width, kinect.height);
 	cd_resImGray.allocate(kinect.width, kinect.height);
+	// init fbo mask
+	pf_fboMask.allocate(kinect.width, kinect.height, GL_RED);
+	pf_bg.allocate(kinect.width, kinect.height);
+	pf_diff.allocate(kinect.width, kinect.height);
 }
 
 //--------------------------------------------------------------
@@ -138,10 +153,14 @@ void ofApp::update() {
 
 	// store data
 	if (kinect.isFrameNew()) {
-		// get RGB captor of kinect
+		// get RGB sensor of kinect
 		ofPixels& pixim = kinect.getPixels();
 		kinectColor.setFromPixels(pixim);
 		kinectGray = kinectColor;
+
+		// get depth sensor of kinect
+		ofPixels& pixDepth = kinect.getDepthPixels();
+		kinectDepth.setFromPixels(pixDepth);
 
 		// k2p calibration
 		if (calibStateInd == 0) {
@@ -224,14 +243,124 @@ void ofApp::update() {
 
 			contourFinder.findContours(cd_resImGray, minDet, maxDet, 2, true);
 		}
-	}
 
-	// update state
-	if (calibStateInd > 3) {
-		calibStateInd = 3;
-	}
-	if (calibStateInd < 0) {
-		calibStateInd = 0;
+		// page flipping detection
+		if (calibStateInd == 3) {
+			// perform detection with shader
+			cd_fboRes.begin();
+			cd_shader.begin();
+			cd_shader.setUniform1f("minX", tableMinW * kinect.width);
+			cd_shader.setUniform1f("maxX", tableMaxW * kinect.width);
+			cd_shader.setUniform1f("minY", tableMinH * kinect.height);
+			cd_shader.setUniform1f("maxY", tableMaxH * kinect.height);
+			cd_shader.setUniform4f("colorToDetect", pd_colorToDetect.r, pd_colorToDetect.g, pd_colorToDetect.b, pd_colorToDetect.a);
+			cd_shader.setUniform1f("colorThresh", pd_colorThresh);
+			kinect.draw(0, 0);
+			cd_shader.end();
+			cd_fboRes.end();
+
+			// perform detection
+			ofPixels pix;
+			cd_fboRes.readToPixels(pix);
+			cd_resImColor.setFromPixels(pix);
+			cd_resImGray = cd_resImColor;
+			cd_resImGray.erode();
+			cd_resImGray.dilate();
+			contourFinder.findContours(cd_resImGray, minDet, maxDet, 2, true);
+
+			// set left and right patterns
+			if (contourFinder.nBlobs == 2) {
+				if (contourFinder.blobs[0].centroid.x < contourFinder.blobs[1].centroid.x) {
+					patternLeft_k.set(contourFinder.blobs[1].centroid);
+					patternRight_k.set(contourFinder.blobs[0].centroid);
+				}
+				else {
+					patternLeft_k.set(contourFinder.blobs[0].centroid);
+					patternRight_k.set(contourFinder.blobs[1].centroid);
+				}
+				ofVec3f patternLeft_t = k2t_matrix * patternLeft_k;
+				ofVec3f patternRight_t = k2t_matrix * patternRight_k;
+				float minPattern_y = min(patternLeft_k.y, patternRight_k.y);
+				float maxPattern_y = max(patternLeft_k.y, patternRight_k.y);
+
+				// detect movement
+				float patternLeftSpeed = patternLeft_k.distanceSquared(patternLeft_k_prev);
+				float patternRightSpeed = patternRight_k.distanceSquared(patternRight_k_prev);
+				bookIsMoving = (patternLeftSpeed > speedThreshold && patternRightSpeed > speedThreshold);
+
+				// set detection quad
+				bookAngle = angleBetweenPoints(ofVec2f(patternLeft_t), ofVec2f(patternRight_t));
+
+				// store background for page flipping detection
+				if (!bookIsMoving and bookIsMoving_prev) {
+					pf_bg.setFromPixels(kinectDepth.getPixels());
+
+				}
+
+				//
+				if (!bookIsMoving) {
+					pf_diff.absDiff(pf_bg, kinectDepth);
+					pf_diff.threshold(10);
+
+					// perform detection with shader
+					gd_fboRes.begin();
+					gd_shader.begin();
+					gd_shader.setUniform1f("minX", patternRight_k.x - 10);
+					gd_shader.setUniform1f("maxX", patternLeft_k.x + 10);
+					gd_shader.setUniform1f("minY", minPattern_y - 50);
+					gd_shader.setUniform1f("maxY", maxPattern_y + 10);
+					gd_shader.setUniform1f("grayThresh", grayThresholdDetect);
+					pf_diff.draw(0, 0);
+					gd_shader.end();
+					gd_fboRes.end();
+
+					// perform detection
+					ofPixels pix;
+					gd_fboRes.readToPixels(pix);
+					gd_resImColor.setFromPixels(pix);
+					gd_resImGray = gd_resImColor;
+					gd_resImGray.erode();
+					gd_resImGray.erode();
+					gd_resImGray.dilate();
+					gd_resImGray.dilate();
+
+					pf_pageContourFinder.setMinAreaRadius(pageMinDet);
+					pf_pageContourFinder.setMaxAreaRadius(pageMaxDet);
+					pf_pageContourFinder.findContours(gd_resImGray);
+
+					// if a contour exists, compare position at age 1 and age 10 to get direction
+					pf_pageBackward = false;
+					pf_pageForward = false;
+					if (pf_pageContourFinder.size() == 1) {
+						if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == 1) {
+							pf_contourStartX = pf_pageContourFinder.getCentroid(0).x;
+						}
+						if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == 10) {
+							float pf_contourDiffX = pf_contourStartX - pf_pageContourFinder.getCentroid(0).x;
+							if (pf_contourDiffX < 0) {
+								ofLog() << "page turn forward";
+								pf_pageForward = true;
+							}
+							else {
+								ofLog() << "page turn backward";
+								pf_pageBackward = true;
+							}
+						}
+					}
+				}
+				
+
+				// update pattern positions
+				patternLeft_k_prev = patternLeft_k;
+				patternRight_k_prev = patternRight_k;
+				bookIsMoving_prev = bookIsMoving;
+			}
+
+			// book size and mapping calibration
+			if (calibStateInd == 4) {
+
+			}
+		}
 	}
 }
 
@@ -252,6 +381,8 @@ void ofApp::draw() {
 	// display info
 	ofDrawBitmapStringHighlight("about:blank -- calibration", kinect.width * 2 + 10, 20);
 	switch (calibStateInd) {
+
+	// kinect <-> projector calibration
 	case 0:
 	{
 		ofDrawBitmapStringHighlight("calib 1\tkinect <-> projector calibration", kinect.width * 2 + 10, 40);
@@ -301,6 +432,8 @@ void ofApp::draw() {
 
 		break;
 	}
+
+	// table <-> kinect calibration
 	case 1:
 	{
 		ofDrawBitmapStringHighlight("calib 2\ttable <-> kinect calibration", kinect.width * 2 + 10, 40);
@@ -326,6 +459,8 @@ void ofApp::draw() {
 
 		break;
 	}
+
+	// patterns color calibration
 	case 2:
 	{
 		ofDrawBitmapStringHighlight("calib 3\tpatterns color calibration", kinect.width * 2 + 10, 40);
@@ -348,13 +483,57 @@ void ofApp::draw() {
 		break;
 	}
 
+	// page flipping calibration
 	case 3:
+	{
 		ofDrawBitmapStringHighlight("calib 4\tpage flipping calibration", kinect.width * 2 + 10, 40);
+
+		if (bookIsMoving) {
+			ofDrawBitmapStringHighlight("book is moving.", kinect.width * 2 + 10, 80);
+		}
+
+		ofDrawBitmapStringHighlight("page backward", kinect.width * 2 + 10, 100);
+		ofDrawBitmapStringHighlight("page forward", kinect.width * 2 + 310, 100);
+		if (pf_pageBackward) {
+			ofSetColor(ofColor::white);
+			ofFill();
+			ofDrawCircle(kinect.width * 2 + 20, 120, 5);
+		}
+		if (pf_pageForward) {
+			ofSetColor(ofColor::white);
+			ofFill();
+			ofDrawCircle(kinect.width * 2 + 320, 120, 5);
+		}
+
+		ofSetColor(ofColor::white);
+		cd_resImGray.draw(kinect.width, 0);
+		contourFinder.draw(kinect.width, 0);
+		pf_bg.draw(0, kinect.height);
+		pf_diff.draw(kinect.width, kinect.height);
+		gd_resImGray.draw(kinect.width, kinect.height);
+		ofPushMatrix();
+		ofTranslate(kinect.width, kinect.height);
+		ofSetColor(ofColor::blue);
+		pf_pageContourFinder.draw();
+		ofPopMatrix();
+
+		ofDrawBitmapStringHighlight("L", patternLeft_k);
+		ofDrawBitmapStringHighlight("R", patternRight_k);
 		break;
+	}
+
+	// book size and mapping calibration
+	case 4:
+	{
+		ofDrawBitmapStringHighlight("calib 5\tbook size and mapping calibration", kinect.width * 2 + 10, 40);
+
+		break;
+	}
 	}
 
 	// draw gui
 	gui.draw();
+	ofDrawBitmapStringHighlight("fps : " + to_string(ofGetFrameRate()), 10, ofGetHeight() - 10);
 }
 
 //--------------------------------------------------------------
@@ -396,9 +575,9 @@ void ofApp::drawGui(ofEventArgs& args) {
 			tableQuad_t.push_back(t2k_testPoint_t + ofVec3f(-5, 5));
 
 			// get quad in projector space
-			vector<ofVec3f> tablerQuad_p;
+			vector<ofVec3f> tableQuad_p;
 			for (int i = 0; i < tableQuad_t.size(); i++) {
-				tablerQuad_p.push_back((k2p_matrix * (t2k_matrix * tableQuad_t[i])));
+				tableQuad_p.push_back((k2p_matrix * (t2k_matrix * tableQuad_t[i])));
 			}
 
 			ofSetColor(ofColor::white);
@@ -407,8 +586,8 @@ void ofApp::drawGui(ofEventArgs& args) {
 
 			ofNoFill();
 			ofBeginShape();
-			for (int i = 0; i < tablerQuad_p.size(); i++) {
-				ofVertex(tablerQuad_p[i]);
+			for (int i = 0; i < tableQuad_p.size(); i++) {
+				ofVertex(tableQuad_p[i]);
 			}
 			ofEndShape(true);
 
@@ -431,6 +610,9 @@ void ofApp::keyPressed(int key) {
 	}
 	if (key == '4') {
 		calibStateInd = 3;
+	}
+	if (key == '5') {
+		calibStateInd = 4;
 	}
 
 	if (key == ' ') {
@@ -563,7 +745,7 @@ void ofApp::dragEvent(ofDragInfo dragInfo) {
 void ofApp::saveCalibFunc() {
 	gui.saveToFile("aboutblank_calib.json");
 
-	if (k2p_storePoints.size() > 0 && !dataSettings.tagExists("k2p_storePoints")) {
+	if (!dataSettings.tagExists("k2p_storePoints")) {
 		dataSettings.addTag("k2p_storePoints");
 		dataSettings.pushTag("k2p_storePoints");
 		for (int i = 0; i < k2p_storePoints.size(); i++) {
@@ -574,6 +756,20 @@ void ofApp::saveCalibFunc() {
 			dataSettings.addValue("y", k2p_storePoints[i].y);
 			dataSettings.addValue("z", k2p_storePoints[i].z);
 			dataSettings.addValue("w", k2p_storePoints[i].w);
+
+			dataSettings.popTag();
+		}
+		dataSettings.popTag();
+	}
+	else {
+		dataSettings.pushTag("k2p_storePoints");
+		for (int i = 0; i < k2p_storePoints.size(); i++) {
+			dataSettings.pushTag("k2p_storePoint", i);
+
+			dataSettings.setValue("x", k2p_storePoints[i].x);
+			dataSettings.setValue("y", k2p_storePoints[i].y);
+			dataSettings.setValue("z", k2p_storePoints[i].z);
+			dataSettings.setValue("w", k2p_storePoints[i].w);
 
 			dataSettings.popTag();
 		}
@@ -591,6 +787,20 @@ void ofApp::saveCalibFunc() {
 			dataSettings.addValue("y", t2k_storePoints[i].y);
 			dataSettings.addValue("z", t2k_storePoints[i].z);
 			dataSettings.addValue("w", t2k_storePoints[i].w);
+
+			dataSettings.popTag();
+		}
+		dataSettings.popTag();
+	}
+	else {
+		dataSettings.pushTag("t2k_storePoints");
+		for (int i = 0; i < t2k_storePoints.size(); i++) {
+			dataSettings.pushTag("t2k_storePoint", i);
+
+			dataSettings.setValue("x", t2k_storePoints[i].x);
+			dataSettings.setValue("y", t2k_storePoints[i].y);
+			dataSettings.setValue("z", t2k_storePoints[i].z);
+			dataSettings.setValue("w", t2k_storePoints[i].w);
 
 			dataSettings.popTag();
 		}

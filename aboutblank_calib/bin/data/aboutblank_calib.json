@@ -1,0 +1,15 @@
+{
+    "group": {
+        "GRAYTHRESHOLDDETECT": "201",
+        "MAXDET": "400",
+        "MINDET": "5",
+        "PAGEMAXDET": "75",
+        "PAGEMINDET": "5",
+        "PD_COLORTHRESH": "0.175",
+        "SPEEDTHRESHOLD": "2.075",
+        "TABLEMAX_H": "0.68",
+        "TABLEMAX_W": "0.835",
+        "TABLEMIN_H": "0.44",
+        "TABLEMIN_W": "0.325"
+    }
+}
