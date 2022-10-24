@@ -1,5 +1,8 @@
 {
     "group": {
+        "BOOKINTERIOROFFSETX": "0.75",
+        "BOOKINTERIOROFFSETY": "2.75",
+        "BOOKLENGTH": "29.525",
         "GRAYTHRESHOLDDETECT": "201",
         "MAXDET": "400",
         "MINDET": "5",

@@ -80,6 +80,7 @@ public:
 	ofVec3f				t2k_testPoint_k;
 	// calib 2 : pattern detection
 	ofColor				pd_colorToDetect;
+	ofxCvContourFinder	pd_contourFinder;
 	// calib 3 : page flipping detection
 	vector<ofVec3f>			pf_detectionQuad_k;
 	ofFbo					pf_fboMask;
@@ -87,6 +88,12 @@ public:
 	ofxCv::ContourFinder	pf_pageContourFinder;
 	float					pf_contourStartX;
 	bool					pf_pageForward, pf_pageBackward;
+	// calib 4 : book size and mapping
+	vector<ofVec3f>			bookQuad_t, bookQuad_k, bookQuad_p;
+	ofVideoPlayer			video;
+	GLfloat					projectionMatrix[16];
+	ofPoint					videoSrcPoints[4];
+	bool					videoMode = false;
 
 	// gui
 	ofxPanel			gui;
@@ -98,6 +105,8 @@ public:
 	// calib 3 : page flipping
 	ofxFloatSlider		speedThreshold;
 	ofxIntSlider		pageMinDet, pageMaxDet;
+	// calib 4 : book size and mapping
+	ofxFloatSlider		bookInteriorOffsetX, bookInteriorOffsetY, bookLength;
 
 	//
 	int					calibStateInd = 0;

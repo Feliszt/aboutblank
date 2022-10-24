@@ -24,6 +24,10 @@ void ofApp::setup() {
 	gui.add(speedThreshold.setup("SPEEDTHRESHOLD", 0.0, 0.0, 5.0));
 	gui.add(pageMinDet.setup("PAGEMINDET", 5, 1, 500));
 	gui.add(pageMaxDet.setup("PAGEMAXDET", 250, 1, 1000));
+	// calib state 3
+	gui.add(bookInteriorOffsetX.setup("BOOKINTERIOROFFSETX", 0, 0, 10));
+	gui.add(bookInteriorOffsetY.setup("BOOKINTERIOROFFSETY", 0, 0, 10));
+	gui.add(bookLength.setup("BOOKLENGTH", 20, 5, 50));
 
 	// functions
 	saveCalib.addListener(this, &ofApp::saveCalibFunc);
@@ -55,6 +59,14 @@ void ofApp::setup() {
 	pf_pageContourFinder.setThreshold(15);
 	pf_pageContourFinder.getTracker().setMaximumDistance(50);
 	pf_pageContourFinder.getTracker().setPersistence(30);
+
+	// init stuff book mapping
+	video.load("video.mp4");
+	video.play();
+	videoSrcPoints[0] = ofPoint(0, 0);
+	videoSrcPoints[1] = ofPoint(video.getWidth(), 0);
+	videoSrcPoints[2] = ofPoint(video.getWidth(), video.getHeight());
+	videoSrcPoints[3] = ofPoint(0, video.getHeight());
 
 	// load data
 	gui.loadFromFile("aboutblank_calib.json");
@@ -151,6 +163,9 @@ void ofApp::update() {
 	kinect.update();
 	tableLimits = ofRectangle(tableMinW * kinect.width, tableMinH * kinect.height, (tableMaxW - tableMinW) * kinect.width, (tableMaxH - tableMinH) * kinect.height);
 
+	// update video
+	video.update();
+
 	// store data
 	if (kinect.isFrameNew()) {
 		// get RGB sensor of kinect
@@ -241,7 +256,7 @@ void ofApp::update() {
 			cd_resImGray.erode();
 			cd_resImGray.dilate();
 
-			contourFinder.findContours(cd_resImGray, minDet, maxDet, 2, true);
+			pd_contourFinder.findContours(cd_resImGray, minDet, maxDet, 2, true);
 		}
 
 		// page flipping detection
@@ -266,20 +281,18 @@ void ofApp::update() {
 			cd_resImGray = cd_resImColor;
 			cd_resImGray.erode();
 			cd_resImGray.dilate();
-			contourFinder.findContours(cd_resImGray, minDet, maxDet, 2, true);
+			pd_contourFinder.findContours(cd_resImGray, minDet, maxDet, 2, true);
 
 			// set left and right patterns
-			if (contourFinder.nBlobs == 2) {
-				if (contourFinder.blobs[0].centroid.x < contourFinder.blobs[1].centroid.x) {
-					patternLeft_k.set(contourFinder.blobs[1].centroid);
-					patternRight_k.set(contourFinder.blobs[0].centroid);
+			if (pd_contourFinder.nBlobs == 2) {
+				if (pd_contourFinder.blobs[0].centroid.x < pd_contourFinder.blobs[1].centroid.x) {
+					patternLeft_k.set(pd_contourFinder.blobs[1].centroid);
+					patternRight_k.set(pd_contourFinder.blobs[0].centroid);
 				}
 				else {
-					patternLeft_k.set(contourFinder.blobs[0].centroid);
-					patternRight_k.set(contourFinder.blobs[1].centroid);
+					patternLeft_k.set(pd_contourFinder.blobs[0].centroid);
+					patternRight_k.set(pd_contourFinder.blobs[1].centroid);
 				}
-				ofVec3f patternLeft_t = k2t_matrix * patternLeft_k;
-				ofVec3f patternRight_t = k2t_matrix * patternRight_k;
 				float minPattern_y = min(patternLeft_k.y, patternRight_k.y);
 				float maxPattern_y = max(patternLeft_k.y, patternRight_k.y);
 
@@ -288,13 +301,9 @@ void ofApp::update() {
 				float patternRightSpeed = patternRight_k.distanceSquared(patternRight_k_prev);
 				bookIsMoving = (patternLeftSpeed > speedThreshold && patternRightSpeed > speedThreshold);
 
-				// set detection quad
-				bookAngle = angleBetweenPoints(ofVec2f(patternLeft_t), ofVec2f(patternRight_t));
-
 				// store background for page flipping detection
 				if (!bookIsMoving and bookIsMoving_prev) {
 					pf_bg.setFromPixels(kinectDepth.getPixels());
-
 				}
 
 				//
@@ -338,27 +347,88 @@ void ofApp::update() {
 						if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == 10) {
 							float pf_contourDiffX = pf_contourStartX - pf_pageContourFinder.getCentroid(0).x;
 							if (pf_contourDiffX < 0) {
-								ofLog() << "page turn forward";
 								pf_pageForward = true;
 							}
 							else {
-								ofLog() << "page turn backward";
 								pf_pageBackward = true;
 							}
 						}
 					}
 				}
-				
 
 				// update pattern positions
 				patternLeft_k_prev = patternLeft_k;
 				patternRight_k_prev = patternRight_k;
 				bookIsMoving_prev = bookIsMoving;
 			}
+		}
 
-			// book size and mapping calibration
-			if (calibStateInd == 4) {
+		// book size and mapping calibration
+		if (calibStateInd == 4) {
+			// perform detection with shader
+			cd_fboRes.begin();
+			cd_shader.begin();
+			cd_shader.setUniform1f("minX", tableMinW * kinect.width);
+			cd_shader.setUniform1f("maxX", tableMaxW * kinect.width);
+			cd_shader.setUniform1f("minY", tableMinH * kinect.height);
+			cd_shader.setUniform1f("maxY", tableMaxH * kinect.height);
+			cd_shader.setUniform4f("colorToDetect", pd_colorToDetect.r, pd_colorToDetect.g, pd_colorToDetect.b, pd_colorToDetect.a);
+			cd_shader.setUniform1f("colorThresh", pd_colorThresh);
+			kinect.draw(0, 0);
+			cd_shader.end();
+			cd_fboRes.end();
 
+			// perform detection
+			ofPixels pix;
+			cd_fboRes.readToPixels(pix);
+			cd_resImColor.setFromPixels(pix);
+			cd_resImGray = cd_resImColor;
+			cd_resImGray.erode();
+			cd_resImGray.dilate();
+			pd_contourFinder.findContours(cd_resImGray, minDet, maxDet, 2, true);
+
+			// set left and right patterns
+			if (pd_contourFinder.nBlobs == 2) {
+				if (pd_contourFinder.blobs[0].centroid.x < pd_contourFinder.blobs[1].centroid.x) {
+					patternLeft_k.set(pd_contourFinder.blobs[1].centroid);
+					patternRight_k.set(pd_contourFinder.blobs[0].centroid);
+				}
+				else {
+					patternLeft_k.set(pd_contourFinder.blobs[0].centroid);
+					patternRight_k.set(pd_contourFinder.blobs[1].centroid);
+				}
+				ofVec3f patternLeft_t = k2t_matrix * patternLeft_k;
+				ofVec3f patternRight_t = k2t_matrix * patternRight_k;
+
+				// set detection quad in table space
+				bookAngle = angleBetweenPoints(ofVec2f(patternLeft_t), ofVec2f(patternRight_t));
+				bookQuad_t.clear();
+				bookQuad_t.push_back(patternLeft_t + ofVec3f(bookInteriorOffsetX * cos(bookAngle) - bookInteriorOffsetY * sin(bookAngle), bookInteriorOffsetX * sin(bookAngle) + bookInteriorOffsetY * cos(bookAngle)));
+				bookQuad_t.push_back(patternRight_t + ofVec3f(-bookInteriorOffsetX * cos(bookAngle) - bookInteriorOffsetY * sin(bookAngle), -bookInteriorOffsetX * sin(bookAngle) + bookInteriorOffsetY * cos(bookAngle)));
+				bookQuad_t.push_back(patternRight_t + ofVec3f(-bookInteriorOffsetX * cos(bookAngle) - (bookInteriorOffsetY + bookLength) * sin(bookAngle), -bookInteriorOffsetX * sin(bookAngle) + (bookInteriorOffsetY + bookLength) * cos(bookAngle)));
+				bookQuad_t.push_back(patternLeft_t + ofVec3f(bookInteriorOffsetX * cos(bookAngle) - (bookInteriorOffsetY + bookLength) * sin(bookAngle), bookInteriorOffsetX * sin(bookAngle) + (bookInteriorOffsetY + bookLength) * cos(bookAngle)));
+
+				// set detection quad in kinect space
+				bookQuad_k.clear();
+				bookQuad_k.push_back(t2k_matrix * bookQuad_t[0]);
+				bookQuad_k.push_back(t2k_matrix * bookQuad_t[1]);
+				bookQuad_k.push_back(t2k_matrix * bookQuad_t[2]);
+				bookQuad_k.push_back(t2k_matrix * bookQuad_t[3]);
+
+				// set detection quad in projector space
+				bookQuad_p.clear();
+				bookQuad_p.push_back(k2p_matrix * bookQuad_k[0]);
+				bookQuad_p.push_back(k2p_matrix * bookQuad_k[1]);
+				bookQuad_p.push_back(k2p_matrix * bookQuad_k[2]);
+				bookQuad_p.push_back(k2p_matrix * bookQuad_k[3]);
+
+				// compute projection matrix
+				ofPoint _bookQuad_p[4];
+				_bookQuad_p[0] = bookQuad_p[0];
+				_bookQuad_p[1] = bookQuad_p[1];
+				_bookQuad_p[2] = bookQuad_p[2];
+				_bookQuad_p[3] = bookQuad_p[3];
+				findHomography(videoSrcPoints, _bookQuad_p, projectionMatrix);
 			}
 		}
 	}
@@ -476,10 +546,8 @@ void ofApp::draw() {
 
 		ofSetColor(ofColor::white);
 		cd_resImGray.draw(kinect.width, 0);
-		contourFinder.draw(0, 0);
-		contourFinder.draw(kinect.width, 0);
-
-
+		pd_contourFinder.draw(0, 0);
+		pd_contourFinder.draw(kinect.width, 0);
 		break;
 	}
 
@@ -507,7 +575,7 @@ void ofApp::draw() {
 
 		ofSetColor(ofColor::white);
 		cd_resImGray.draw(kinect.width, 0);
-		contourFinder.draw(kinect.width, 0);
+		pd_contourFinder.draw(kinect.width, 0);
 		pf_bg.draw(0, kinect.height);
 		pf_diff.draw(kinect.width, kinect.height);
 		gd_resImGray.draw(kinect.width, kinect.height);
@@ -527,6 +595,29 @@ void ofApp::draw() {
 	{
 		ofDrawBitmapStringHighlight("calib 5\tbook size and mapping calibration", kinect.width * 2 + 10, 40);
 
+		ofSetColor(ofColor::white);
+		cd_resImGray.draw(kinect.width, 0);
+		pd_contourFinder.draw(0, 0);
+		ofPushMatrix();
+		ofTranslate(0, kinect.height);
+		ofPushMatrix();
+		ofScale(0.3);
+		video.draw(0, kinect.height);
+		ofPopMatrix();
+		ofPopMatrix();
+
+		// draw book boundaries on kinect space
+		if (bookQuad_k.size() == 4) {
+			ofSetColor(ofColor::black);
+			ofBeginShape();
+			ofVertex(bookQuad_k[0]);
+			ofVertex(bookQuad_k[1]);
+			ofVertex(bookQuad_k[2]);
+			ofVertex(bookQuad_k[3]);
+			ofEndShape(true);
+			ofDrawLine(bookQuad_k[0], bookQuad_k[2]);
+			ofDrawLine(bookQuad_k[1], bookQuad_k[3]);
+		}
 		break;
 	}
 	}
@@ -562,7 +653,6 @@ void ofApp::drawGui(ofEventArgs& args) {
 	case 1:
 	{
 		if (t2k_matrixComputed) {
-
 			// get center of table in table space
 			ofVec3f t2k_testPoint_t = k2t_matrix * t2k_testPoint_k;
 			ofVec3f t2k_testPoint_p = k2p_matrix * t2k_testPoint_k;
@@ -593,6 +683,31 @@ void ofApp::drawGui(ofEventArgs& args) {
 
 		}
 		break;
+	}
+	case 4 :
+	{
+		if (!videoMode) {
+			// draw book boundaries on projector space
+			if (bookQuad_p.size() == 4) {
+				ofSetColor(ofColor::green);
+				ofBeginShape();
+				ofVertex(bookQuad_p[0]);
+				ofVertex(bookQuad_p[1]);
+				ofVertex(bookQuad_p[2]);
+				ofVertex(bookQuad_p[3]);
+				ofEndShape(true);
+				ofDrawLine(bookQuad_p[0], bookQuad_p[2]);
+				ofDrawLine(bookQuad_p[1], bookQuad_p[3]);
+			}
+		}
+		else {
+			// draw video
+			ofPushMatrix();
+			ofMultMatrix(projectionMatrix);
+			ofSetColor(255);
+			video.draw(0, 0);
+			ofPopMatrix();
+		}
 	}
 	}
 }
@@ -658,6 +773,13 @@ void ofApp::keyPressed(int key) {
 			t2k_matrix = findHomography(tPoints, kPoints);
 			k2t_matrix = findHomography(kPoints, tPoints);
 			t2k_matrixComputed = true;
+		}
+	}
+
+	if (key == 'v') {
+		// toggle video mode
+		if (calibStateInd == 4) {
+			videoMode = !videoMode;
 		}
 	}
 }
