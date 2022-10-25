@@ -32,6 +32,7 @@ class ofApp : public ofBaseApp{
 		void gotMessage(ofMessage msg);
 
 		// global
+		void changeVideo(int _targetInd);
 		void saveCalibFunc();
 		void gaussian_elimination(float* input, int n);
 		void findHomography(ofPoint src[4], ofPoint dst[4], float homography[16]);
@@ -54,7 +55,10 @@ class ofApp : public ofBaseApp{
 		ofxCvContourFinder	contourFinder;
 		ofVec3f				patternLeft_k, patternRight_k, patternLeft_k_prev, patternRight_k_prev;
 		float				bookAngle;
-		bool				bookIsMoving, bookIsMoving_prev;
+		bool				bookIsGone, bookIsGone_prev, bookIsGoneLong, bookIsMoving, bookIsMoving_prev;
+		int					bookIsGoneCountdown = 150;
+		vector<string>		videoPaths;
+		int					videoCurrInd = 0;
 		// gray detection shader
 		ofShader			gd_shader;
 		ofFbo				gd_fboRes;
@@ -109,7 +113,6 @@ class ofApp : public ofBaseApp{
 		ofxFloatSlider		bookInteriorOffsetX, bookInteriorOffsetY, bookLength;
 
 		//
-		int					calibStateInd = 0;
 		ofxXmlSettings		dataSettings;
 		
 };
