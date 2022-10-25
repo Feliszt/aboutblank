@@ -24,6 +24,7 @@ void ofApp::setup() {
 	gui.add(speedThreshold.setup("SPEEDTHRESHOLD", 0.0, 0.0, 5.0));
 	gui.add(pageMinDet.setup("PAGEMINDET", 5, 1, 500));
 	gui.add(pageMaxDet.setup("PAGEMAXDET", 250, 1, 1000));
+	gui.add(pageAgeDetect.setup("PAGEAGEDETECT", 10, 2, 20));
 	// calib state 3
 	gui.add(bookInteriorOffsetX.setup("BOOKINTERIOROFFSETX", 0, 0, 10));
 	gui.add(bookInteriorOffsetY.setup("BOOKINTERIOROFFSETY", 0, 0, 10));
@@ -344,7 +345,7 @@ void ofApp::update() {
 						if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == 1) {
 							pf_contourStartX = pf_pageContourFinder.getCentroid(0).x;
 						}
-						if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == 10) {
+						if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == pageAgeDetect) {
 							float pf_contourDiffX = pf_contourStartX - pf_pageContourFinder.getCentroid(0).x;
 							if (pf_contourDiffX < 0) {
 								pf_pageForward = true;

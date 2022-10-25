@@ -21,7 +21,7 @@ int main() {
 	shared_ptr<ofAppBaseWindow> mainWindow = ofCreateWindow(settings);
 
 	settings.setSize(guiWindowW, guiWindowH);
-	settings.setPosition(ofVec2f(1920, -853));
+	settings.setPosition(ofVec2f(-1920, -1080));
 	settings.decorated = true;
 	settings.resizable = true;
 	settings.shareContextWith = mainWindow;

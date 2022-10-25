@@ -1,4 +1,9 @@
-D:/SOFTWARE/OF/of_v0.10.0_vs2017_release/apps/myApps/aboutblank/aboutblank_run/bin/data/videos/01_fusee.mp4
-D:/SOFTWARE/OF/of_v0.10.0_vs2017_release/apps/myApps/aboutblank/aboutblank_run/bin/data/videos/02_avalanche.mp4
-D:/SOFTWARE/OF/of_v0.10.0_vs2017_release/apps/myApps/aboutblank/aboutblank_run/bin/data/videos/03_skilift01.mp4
-D:/SOFTWARE/OF/of_v0.10.0_vs2017_release/apps/myApps/aboutblank/aboutblank_run/bin/data/videos/04_calmstorm.mp4
+videos/01_RMF22.mp4
+videos/02_RMF22.mp4
+videos/03_RMF22.mp4
+videos/04_RMF22.mp4
+videos/05_RMF22.mp4
+videos/06_RMF22.mp4
+videos/07_RMF22.mp4
+videos/08_RMF22.mp4
+videos/09_RMF22.mp4

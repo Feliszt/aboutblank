@@ -24,6 +24,8 @@ void ofApp::setup() {
 	gui.add(speedThreshold.setup("SPEEDTHRESHOLD", 0.0, 0.0, 5.0));
 	gui.add(pageMinDet.setup("PAGEMINDET", 5, 1, 500));
 	gui.add(pageMaxDet.setup("PAGEMAXDET", 250, 1, 1000));
+	gui.add(pageAgeDetect.setup("PAGEAGEDETECT", 10, 2, 20));
+
 	// calib state 3
 	gui.add(bookInteriorOffsetX.setup("BOOKINTERIOROFFSETX", 0, 0, 10));
 	gui.add(bookInteriorOffsetY.setup("BOOKINTERIOROFFSETY", 0, 0, 10));
@@ -35,7 +37,7 @@ void ofApp::setup() {
 	// init stuff for page flipping detection
 	pf_pageContourFinder.setThreshold(15);
 	pf_pageContourFinder.getTracker().setMaximumDistance(50);
-	pf_pageContourFinder.getTracker().setPersistence(30);
+	pf_pageContourFinder.getTracker().setPersistence(20);
 
 	// load videos
 	ofBuffer videoListbuffer = ofBufferFromFile("videoList.txt");
@@ -204,6 +206,9 @@ void ofApp::update() {
 
 		// set left and right patterns
 		if (pd_contourFinder.nBlobs == 2) {
+			// vidoe volume to 1
+			video.setVolume(1.0);
+
 			if (pd_contourFinder.blobs[0].centroid.x < pd_contourFinder.blobs[1].centroid.x) {
 				patternLeft_k.set(pd_contourFinder.blobs[1].centroid);
 				patternRight_k.set(pd_contourFinder.blobs[0].centroid);
@@ -265,7 +270,7 @@ void ofApp::update() {
 					if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == 1) {
 						pf_contourStartX = pf_pageContourFinder.getCentroid(0).x;
 					}
-					if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == 10) {
+					if (pf_pageContourFinder.getTracker().getAge(pf_pageContourFinder.getLabel(0)) == pageAgeDetect) {
 						float pf_contourDiffX = pf_contourStartX - pf_pageContourFinder.getCentroid(0).x;
 						if (pf_contourDiffX < 0) {
 							pf_pageForward = true;
@@ -321,6 +326,7 @@ void ofApp::update() {
 		bookIsGone = (pd_contourFinder.nBlobs == 0);
 
 		if (bookIsGone) {
+			video.setVolume(0.0);
 			bookIsGoneCountdown++;
 
 			if (bookIsGoneCountdown == 5 * 30) {
@@ -597,13 +603,16 @@ void ofApp::draw() {
 	ofBackground(0);
 
 	//
-	ofSetColor(ofColor::white);
-	kinectColor.draw(0, 0);
+	if (showDebug) {
+		ofSetColor(ofColor::white);
+		kinectColor.draw(0, 0);
 
-	// draw table limits
-	ofSetColor(ofColor::red);
-	ofNoFill();
-	ofDrawRectangle(tableLimits);
+
+		// draw table limits
+		ofSetColor(ofColor::red);
+		ofNoFill();
+		ofDrawRectangle(tableLimits);
+	}
 
 	// display info
 	ofDrawBitmapStringHighlight("about:blank -- run", kinect.width * 2 + 10, 20);
@@ -634,32 +643,34 @@ void ofApp::draw() {
 		videoListPosY += 20;
 	}
 
-	ofSetColor(ofColor::white);
-	cd_resImGray.draw(kinect.width, 0);
-	pd_contourFinder.draw(kinect.width, 0);
-	pf_bg.draw(0, kinect.height);
-	pf_diff.draw(kinect.width, kinect.height);
-	gd_resImGray.draw(kinect.width, kinect.height);
-	ofPushMatrix();
-	ofTranslate(kinect.width, kinect.height);
-	ofSetColor(ofColor::blue);
-	pf_pageContourFinder.draw();
-	ofPopMatrix();
+	if (showDebug) {
+		ofSetColor(ofColor::white);
+		cd_resImGray.draw(kinect.width, 0);
+		pd_contourFinder.draw(kinect.width, 0);
+		pf_bg.draw(0, kinect.height);
+		pf_diff.draw(kinect.width, kinect.height);
+		gd_resImGray.draw(kinect.width, kinect.height);
+		ofPushMatrix();
+		ofTranslate(kinect.width, kinect.height);
+		ofSetColor(ofColor::blue);
+		pf_pageContourFinder.draw();
+		ofPopMatrix();
 
-	ofDrawBitmapStringHighlight("L", patternLeft_k);
-	ofDrawBitmapStringHighlight("R", patternRight_k);
+		ofDrawBitmapStringHighlight("L", patternLeft_k);
+		ofDrawBitmapStringHighlight("R", patternRight_k);
 
-	// draw book boundaries on kinect space
-	if (bookQuad_k.size() == 4) {
-		ofSetColor(ofColor::black);
-		ofBeginShape();
-		ofVertex(bookQuad_k[0]);
-		ofVertex(bookQuad_k[1]);
-		ofVertex(bookQuad_k[2]);
-		ofVertex(bookQuad_k[3]);
-		ofEndShape(true);
-		ofDrawLine(bookQuad_k[0], bookQuad_k[2]);
-		ofDrawLine(bookQuad_k[1], bookQuad_k[3]);
+		// draw book boundaries on kinect space
+		if (bookQuad_k.size() == 4) {
+			ofSetColor(ofColor::black);
+			ofBeginShape();
+			ofVertex(bookQuad_k[0]);
+			ofVertex(bookQuad_k[1]);
+			ofVertex(bookQuad_k[2]);
+			ofVertex(bookQuad_k[3]);
+			ofEndShape(true);
+			ofDrawLine(bookQuad_k[0], bookQuad_k[2]);
+			ofDrawLine(bookQuad_k[1], bookQuad_k[3]);
+		}
 	}
 
 	// draw gui
@@ -684,7 +695,9 @@ void ofApp::drawGui(ofEventArgs& args) {
 
 //--------------------------------------------------------------
 void ofApp::keyPressed(int key) {
-
+	if (key == ' ') {
+		showDebug = !showDebug;
+	}
 }
 
 //--------------------------------------------------------------
@@ -751,15 +764,13 @@ void ofApp::changeVideo(int _targetInd) {
 	}
 
 	if (videoCurrInd >= videoPaths.size()) {
-		videoCurrInd = videoPaths.size() - 1;
-		return;
+		videoCurrInd = 0;
 	}
 
 	// close current video then load and display the next
 	video.close();
 	video.load(videoPaths[videoCurrInd]);
 	video.play();
-	video.setVolume(0.0);
 
 	// get info about video
 	videoSrcPoints[0] = ofPoint(0, 0);

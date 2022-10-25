@@ -104,7 +104,7 @@ public:
 	ofxFloatSlider		pd_colorThresh;
 	// calib 3 : page flipping
 	ofxFloatSlider		speedThreshold;
-	ofxIntSlider		pageMinDet, pageMaxDet;
+	ofxIntSlider		pageMinDet, pageMaxDet, pageAgeDetect;
 	// calib 4 : book size and mapping
 	ofxFloatSlider		bookInteriorOffsetX, bookInteriorOffsetY, bookLength;
 
